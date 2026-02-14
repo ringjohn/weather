@@ -2,3 +2,5 @@ numpy
 pandas
 xarray
 herbie-data
+rich
+matplotlib
