@@ -20,9 +20,8 @@ All code lives in `degree_days.ipynb`. The core class is `DegreeDayExtractor`:
 
 - `get_forecast(model, date, fxx)` — fetches 2m temperature data via Herbie for CONUS
 - `calc_degree_days(ds)` — converts Kelvin to Fahrenheit, computes HDD/CDD against a 65°F base
-- `apply_weights(dd_array, lat, lon)` — applies spatial weights (gas/population); **incomplete** — `weighted_value` is undefined when weights are provided
+- `apply_weights(dd_array, lat, lon)` — interpolates spatial weights (gas/population) onto the forecast grid via nearest-neighbor, computes weighted average
 
-## Known Issues
+## Notes
 
-- `apply_weights` has an undefined variable (`weighted_value`) in the weighted branch
 - Herbie config is at `~/.config/herbie/config.toml`
