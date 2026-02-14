@@ -8,7 +8,7 @@ Jupyter notebook-based tool for calculating Heating Degree Days (HDD) and Coolin
 
 ## Dependencies
 
-Requires: numpy, pandas, xarray, herbie. No requirements.txt or environment file exists yet — install manually via pip.
+Install via `pip install -r requirements.txt`. Requires: numpy, pandas, xarray, herbie-data.
 
 ## Running
 
