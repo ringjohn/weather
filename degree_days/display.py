@@ -164,7 +164,7 @@ def plot_trend(runs, target_date, save_path="trend.png"):
     console.print(f"Trend chart saved to [green]{save_path}[/green]")
 
 
-def print_model_comparison_table(model_runs):
+def print_model_comparison_table(model_runs, reference_runs=None):
     """
     Print HDD and CDD tables with dates as rows and models as columns.
     model_runs: list of (model_name, run_date, run_hour, DataFrame).
@@ -180,26 +180,102 @@ def print_model_comparison_table(model_runs):
         all_dates.update(df['valid_date'].tolist())
     all_dates = sorted(all_dates)
 
+    # Get normals for these dates
+    normals_df = normals_for_dates(all_dates)
+    normals_map = {}
+    for _, row in normals_df.iterrows():
+        normals_map[row['valid_date']] = (row['normal_HDD'], row['normal_CDD'])
+
     # Build column headers: "MODEL\nDD-MMM HHz"
     headers = []
     for model, rd, rh, _ in model_runs:
         headers.append(f"{model.upper()}\n{rd[5:]} {rh:02d}z")
 
+    normal_metric_key = {'HDD': 'normal_HDD', 'CDD': 'normal_CDD'}
+
     for metric in ('HDD', 'CDD'):
-        table = Table(title=f"{metric} by Model (latest run)")
-        table.add_column("Date", style="cyan")
+        table = Table(title=f"{metric} Departure from Normal")
+        table.add_column("Date", style="cyan", no_wrap=True)
+        table.add_column("Normal", justify="right", style="dim")
         for hdr in headers:
             table.add_column(hdr, justify="right")
 
+        norm_idx = 0 if metric == 'HDD' else 1
+        # Track column sums for summary row
+        col_sums = [0.0] * len(model_runs)
+        col_counts = [0] * len(model_runs)
+
         for vdate in all_dates:
-            row_vals = [vdate]
-            for _, _, _, df in model_runs:
+            short_date = pd.Timestamp(vdate).strftime('%b %d')
+            norm_val = normals_map.get(vdate, (None, None))[norm_idx]
+            norm_str = f"{norm_val:.1f}" if norm_val is not None else "-"
+            row_vals = [short_date, norm_str]
+            for i, (_, _, _, df) in enumerate(model_runs):
                 match = df[df['valid_date'] == vdate]
-                if len(match) > 0:
-                    row_vals.append(f"{match.iloc[0][metric]:.1f}")
+                if len(match) > 0 and norm_val is not None:
+                    dep = match.iloc[0][metric] - norm_val
+                    col_sums[i] += dep
+                    col_counts[i] += 1
+                    row_vals.append(_format_departure(dep))
                 else:
                     row_vals.append("-")
             table.add_row(*row_vals)
+
+        # Summary row
+        table.add_section()
+        sum_row = ["Total", ""]
+        for i in range(len(model_runs)):
+            if col_counts[i] > 0:
+                sum_row.append(_format_departure(col_sums[i]))
+            else:
+                sum_row.append("-")
+        table.add_row(*sum_row, style="bold")
+
+        console.print(table)
+        console.print()
+
+    # HDD change vs reference (e.g. Friday 12z)
+    if reference_runs:
+        # Build a lookup: model -> {vdate: HDD}
+        ref_map = {}
+        ref_label = None
+        for model, rd, rh, df in reference_runs:
+            ref_label = ref_label or f"{rd[5:]} {rh:02d}z"
+            ref_map[model] = {}
+            for _, row in df.iterrows():
+                ref_map[model][row['valid_date']] = row['HDD']
+
+        table = Table(title=f"HDD Change since {ref_label}")
+        table.add_column("Date", style="cyan", no_wrap=True)
+        for hdr in headers:
+            table.add_column(hdr, justify="right")
+
+        col_sums = [0.0] * len(model_runs)
+        col_counts = [0] * len(model_runs)
+
+        for vdate in all_dates:
+            short_date = pd.Timestamp(vdate).strftime('%b %d')
+            row_vals = [short_date]
+            for i, (model, _, _, df) in enumerate(model_runs):
+                match = df[df['valid_date'] == vdate]
+                ref_hdd = ref_map.get(model, {}).get(vdate)
+                if len(match) > 0 and ref_hdd is not None:
+                    chg = match.iloc[0]['HDD'] - ref_hdd
+                    col_sums[i] += chg
+                    col_counts[i] += 1
+                    row_vals.append(_format_departure(chg))
+                else:
+                    row_vals.append("-")
+            table.add_row(*row_vals)
+
+        table.add_section()
+        sum_row = ["Total"]
+        for i in range(len(model_runs)):
+            if col_counts[i] > 0:
+                sum_row.append(_format_departure(col_sums[i]))
+            else:
+                sum_row.append("-")
+        table.add_row(*sum_row, style="bold")
 
         console.print(table)
         console.print()

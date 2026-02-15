@@ -177,7 +177,20 @@ def main():
             df = cache.get_run(m, target_date, target_hour)
             if df is not None:
                 model_runs.append((m, target_date, target_hour, df))
-        print_model_comparison_table(model_runs)
+
+        # Find Friday 12z reference for each model
+        reference_runs = []
+        for m in compare_models:
+            ref_df = cache.get_friday_12z(m, target_date)
+            if ref_df is not None:
+                # Get the actual Friday date
+                from datetime import timedelta
+                d = datetime.strptime(target_date, '%Y-%m-%d').date()
+                days_since_friday = (d.weekday() - 4) % 7
+                friday = d - timedelta(days=days_since_friday)
+                reference_runs.append((m, friday.strftime('%Y-%m-%d'), 12, ref_df))
+
+        print_model_comparison_table(model_runs, reference_runs=reference_runs or None)
         return
 
     if args.trend:
