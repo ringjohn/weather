@@ -280,6 +280,65 @@ def print_model_comparison_table(model_runs, reference_runs=None):
         console.print(table)
         console.print()
 
+    # Cumulative season anomalies
+    # XH (extended heating): Nov 1 - Mar 31 → show HDD cumulative anomaly
+    # JV (summer/cooling):   Apr 1 - Oct 31 → show CDD cumulative anomaly
+    _print_cumulative_season_anomalies(model_runs, all_dates, normals_map, headers)
+
+
+def _season_for_date(vdate):
+    """Return 'XH' for Nov 1 - Mar 31, 'JV' for Apr 1 - Oct 31."""
+    month = pd.Timestamp(vdate).month
+    if month >= 11 or month <= 3:
+        return 'XH'
+    return 'JV'
+
+
+def _print_cumulative_season_anomalies(model_runs, all_dates, normals_map, headers):
+    """Print cumulative season-to-date HDD/CDD anomaly tables."""
+    # Group dates by season
+    seasons = {}
+    for vdate in all_dates:
+        s = _season_for_date(vdate)
+        seasons.setdefault(s, []).append(vdate)
+
+    for season, dates in sorted(seasons.items()):
+        dates = sorted(dates)
+        if season == 'XH':
+            metric = 'HDD'
+            title = f"Cumulative HDD Anomaly — XH Season (Nov-Mar)"
+            norm_idx = 0
+        else:
+            metric = 'CDD'
+            title = f"Cumulative CDD Anomaly — JV Season (Apr-Oct)"
+            norm_idx = 1
+
+        table = Table(title=title)
+        table.add_column("Date", style="cyan", no_wrap=True)
+        for hdr in headers:
+            table.add_column(hdr, justify="right")
+
+        cum = [0.0] * len(model_runs)
+        has_data = [False] * len(model_runs)
+
+        for vdate in dates:
+            short_date = pd.Timestamp(vdate).strftime('%b %d')
+            norm_val = normals_map.get(vdate, (None, None))[norm_idx]
+            row_vals = [short_date]
+            for i, (_, _, _, df) in enumerate(model_runs):
+                match = df[df['valid_date'] == vdate]
+                if len(match) > 0 and norm_val is not None:
+                    dep = match.iloc[0][metric] - norm_val
+                    cum[i] += dep
+                    has_data[i] = True
+                    row_vals.append(_format_departure(cum[i]))
+                else:
+                    row_vals.append("-" if not has_data[i] else _format_departure(cum[i]))
+            table.add_row(*row_vals)
+
+        console.print(table)
+        console.print()
+
 
 def _compute_changes(current_df, compare_df):
     """Merge two forecast DataFrames and compute HDD/CDD changes."""

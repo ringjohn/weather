@@ -4,3 +4,5 @@ xarray
 herbie-data
 rich
 matplotlib
+requests
+python-dotenv
