@@ -57,7 +57,8 @@ def _format_departure(val):
 
 def print_trend_table(runs, model='gfs'):
     """
-    Print a Rich table showing how forecasts have changed across recent model runs.
+    Print two Rich tables (HDD and CDD) showing how forecasts have changed
+    across recent model runs.
     runs: list of (run_date, run_hour, DataFrame) from ForecastCache.get_recent_runs().
     """
     if not runs:
@@ -70,27 +71,30 @@ def print_trend_table(runs, model='gfs'):
         all_dates.update(df['valid_date'].tolist())
     all_dates = sorted(all_dates)
 
-    table = Table(title=f"Forecast Trend — {model.upper()}")
-    table.add_column("Date", style="cyan")
-    for run_date, run_hour, _ in runs:
-        table.add_column(f"{run_date} {run_hour:02d}z", justify="right")
+    run_headers = [f"{rd} {rh:02d}z" for rd, rh, _ in runs]
 
-    for vdate in all_dates:
-        row_vals = [vdate]
-        for _, _, df in runs:
-            match = df[df['valid_date'] == vdate]
-            if len(match) > 0:
-                hdd = match.iloc[0]['HDD']
-                cdd = match.iloc[0]['CDD']
-                row_vals.append(f"H{hdd:.0f}/C{cdd:.0f}")
-            else:
-                row_vals.append("-")
-        table.add_row(*row_vals)
+    for metric in ('HDD', 'CDD'):
+        table = Table(title=f"{metric} Trend — {model.upper()}")
+        table.add_column("Date", style="cyan")
+        for hdr in run_headers:
+            table.add_column(hdr, justify="right")
 
-    console.print(table)
+        for vdate in all_dates:
+            row_vals = [vdate]
+            for _, _, df in runs:
+                match = df[df['valid_date'] == vdate]
+                if len(match) > 0:
+                    val = match.iloc[0][metric]
+                    row_vals.append(f"{val:.1f}")
+                else:
+                    row_vals.append("-")
+            table.add_row(*row_vals)
+
+        console.print(table)
+        console.print()
 
 
-def plot_forecast_vs_normals(daily_df, normals_df=None, save_path="forecast.png"):
+def plot_forecast_vs_normals(daily_df, normals_df=None, save_path="forecast.png", run_label=None):
     """Bar chart of forecast HDD/CDD with normal overlaid as lines."""
     import matplotlib
     matplotlib.use('Agg')
@@ -114,7 +118,10 @@ def plot_forecast_vs_normals(daily_df, normals_df=None, save_path="forecast.png"
     ax.set_xticks(x)
     ax.set_xticklabels(dates, rotation=45, ha='right', fontsize=8)
     ax.set_ylabel('Degree Days')
-    ax.set_title('Forecast vs. 30-Year Normals')
+    title = 'Forecast vs. 30-Year Normals'
+    if run_label:
+        title += f' — {run_label}'
+    ax.set_title(title)
     ax.legend()
     fig.tight_layout()
     fig.savefig(save_path, dpi=150)
@@ -155,3 +162,114 @@ def plot_trend(runs, target_date, save_path="trend.png"):
     fig.savefig(save_path, dpi=150)
     plt.close(fig)
     console.print(f"Trend chart saved to [green]{save_path}[/green]")
+
+
+def print_model_comparison_table(model_runs):
+    """
+    Print HDD and CDD tables with dates as rows and models as columns.
+    model_runs: list of (model_name, run_date, run_hour, DataFrame).
+    Each DataFrame has columns: valid_date, HDD, CDD.
+    """
+    if not model_runs:
+        console.print("[yellow]No model runs to compare.[/yellow]")
+        return
+
+    # Collect all valid_dates
+    all_dates = set()
+    for _, _, _, df in model_runs:
+        all_dates.update(df['valid_date'].tolist())
+    all_dates = sorted(all_dates)
+
+    # Build column headers: "MODEL\nDD-MMM HHz"
+    headers = []
+    for model, rd, rh, _ in model_runs:
+        headers.append(f"{model.upper()}\n{rd[5:]} {rh:02d}z")
+
+    for metric in ('HDD', 'CDD'):
+        table = Table(title=f"{metric} by Model (latest run)")
+        table.add_column("Date", style="cyan")
+        for hdr in headers:
+            table.add_column(hdr, justify="right")
+
+        for vdate in all_dates:
+            row_vals = [vdate]
+            for _, _, _, df in model_runs:
+                match = df[df['valid_date'] == vdate]
+                if len(match) > 0:
+                    row_vals.append(f"{match.iloc[0][metric]:.1f}")
+                else:
+                    row_vals.append("-")
+            table.add_row(*row_vals)
+
+        console.print(table)
+        console.print()
+
+
+def _compute_changes(current_df, compare_df):
+    """Merge two forecast DataFrames and compute HDD/CDD changes."""
+    merged = current_df.merge(
+        compare_df, on='valid_date', how='inner', suffixes=('_cur', '_cmp')
+    )
+    merged['HDD_change'] = merged['HDD_cur'] - merged['HDD_cmp']
+    merged['CDD_change'] = merged['CDD_cur'] - merged['CDD_cmp']
+    return merged
+
+
+def print_changes_table(current_df, compare_df, current_label, compare_label):
+    """Rich table showing HDD/CDD changes between two forecast runs."""
+    merged = _compute_changes(current_df, compare_df)
+    if merged.empty:
+        console.print("[yellow]No overlapping dates to compare.[/yellow]")
+        return
+
+    table = Table(title=f"Forecast Changes: {current_label} vs {compare_label}")
+    table.add_column("Date", style="cyan")
+    table.add_column("HDD Change", justify="right")
+    table.add_column("CDD Change", justify="right")
+    table.add_column("Net Effect", justify="right")
+
+    for _, row in merged.iterrows():
+        hdd_chg = row['HDD_change']
+        cdd_chg = row['CDD_change']
+        # Positive CDD change or negative HDD change = warmer
+        net = cdd_chg - hdd_chg
+        table.add_row(
+            row['valid_date'],
+            _format_departure(hdd_chg),
+            _format_departure(cdd_chg),
+            _format_departure(net),
+        )
+
+    console.print(table)
+
+
+def plot_changes(current_df, compare_df, current_label, compare_label, save_path="changes.png"):
+    """Bar chart showing HDD/CDD changes between two forecast runs."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    merged = _compute_changes(current_df, compare_df)
+    if merged.empty:
+        console.print("[yellow]No overlapping dates to chart.[/yellow]")
+        return
+
+    dates = merged['valid_date']
+    x = np.arange(len(dates))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(max(10, len(dates) * 0.6), 6))
+    ax.bar(x - width / 2, merged['HDD_change'], width, label='HDD Change', color='steelblue')
+    ax.bar(x + width / 2, merged['CDD_change'], width, label='CDD Change', color='coral')
+    ax.axhline(y=0, color='black', linewidth=0.5)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(dates, rotation=45, ha='right', fontsize=8)
+    ax.set_ylabel('Degree Day Change')
+    ax.set_title(f'Forecast Changes: {current_label} vs {compare_label}')
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150)
+    plt.close(fig)
+    console.print(f"Changes chart saved to [green]{save_path}[/green]")

@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -73,3 +74,27 @@ class ForecastCache:
             if df is not None:
                 results.append((run_date, run_hour, df))
         return results
+
+    def get_run_by_offset(self, model, run_date, run_hour, hours_back):
+        """Find the run that is `hours_back` hours before the given run."""
+        dt = datetime.strptime(run_date, '%Y-%m-%d') + timedelta(hours=run_hour)
+        target = dt - timedelta(hours=hours_back)
+        return self.get_run(model, target.strftime('%Y-%m-%d'), target.hour)
+
+    def get_friday_12z(self, model, run_date):
+        """Find the most recent Friday 12z run on or before the given date."""
+        d = datetime.strptime(run_date, '%Y-%m-%d').date()
+        days_since_friday = (d.weekday() - 4) % 7
+        friday = d - timedelta(days=days_since_friday)
+        return self.get_run(model, friday.strftime('%Y-%m-%d'), 12)
+
+    def get_all_runs(self, model):
+        """Return a list of (run_date, run_hour) for all cached runs."""
+        with self._conn() as conn:
+            return conn.execute(
+                """SELECT DISTINCT run_date, run_hour
+                   FROM forecasts
+                   WHERE model=?
+                   ORDER BY run_date DESC, run_hour DESC""",
+                (model,),
+            ).fetchall()
